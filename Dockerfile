@@ -1,31 +1,31 @@
-# Use a modern Node.js base
-FROM node:20-buster
+# Use newer Debian (bookworm) base with Node 20
+FROM node:20-bookworm
 
-# Install system dependencies for Baileys (media handling)
+# Install dependencies required by Baileys for media handling
 RUN apt-get update && \
-  apt-get install -y ffmpeg imagemagick webp && \
+  apt-get install -y ffmpeg imagemagick libwebp-tools && \
   apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+# Set working directory
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json first for caching
+# Copy dependency files first
 COPY package*.json ./
 
-# Install only production dependencies
+# Install dependencies
 RUN npm install --omit=dev && npm install -g pm2 qrcode-terminal
 
-# Copy the rest of the app
+# Copy all source code
 COPY . .
 
-# Ensure session folder exists (Baileys needs it)
+# Ensure session folder exists
 RUN mkdir -p ./session
 
-# Expose your Express port
+# Expose backend port
 EXPOSE 5000
 
-# Healthcheck (optional)
+# Optional healthcheck
 HEALTHCHECK CMD curl --fail http://localhost:5000/ || exit 1
 
-# Start the app using PM2 for stability
+# Start using PM2 for stability
 CMD ["pm2-runtime", "index.js"]
