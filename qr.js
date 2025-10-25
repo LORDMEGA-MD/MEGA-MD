@@ -1,131 +1,70 @@
-const { makeid } = require('./gen-id');
-const express = require('express');
-const QRCode = require('qrcode');
-const fs = require('fs');
-const pino = require('pino');
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    delay,
-    Browsers
-} = require("@whiskeysockets/baileys");
-const { upload } = require('./mega');
+const express = require("express");
+const makeWASocket = require("@whiskeysockets/baileys").default;
+const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
+const qrcode = require("qrcode");
+const fs = require("fs");
+const path = require("path");
 
-const router = express.Router();
+const app = express();
+const PORT = process.env.PORT || 5000;
 
-function removeFile(filePath) {
-    if (fs.existsSync(filePath)) fs.rmSync(filePath, { recursive: true, force: true });
-}
+let currentQR = null; // store current QR as base64
+let connectionStatus = "waiting";
 
-router.get('/', async (req, res) => {
-    const id = makeid();
-    const tempDir = `./temp/${id}`;
-    let qrSent = false; // Flag to ensure QR is sent once
-
-    async function MEGA_MD_PAIR_CODE() {
-        const { state, saveCreds } = await useMultiFileAuthState(tempDir);
-
-        try {
-            const sock = makeWASocket({
-                auth: state,
-                printQRInTerminal: false,
-                logger: pino({ level: "silent" }),
-                browser: Browsers.macOS("Desktop")
-            });
-
-            sock.ev.on('creds.update', saveCreds);
-
-            sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
-
-                // Send QR to browser once
-                if (qr && !qrSent) {
-                    qrSent = true;
-                    try {
-                        const qrBuffer = await QRCode.toBuffer(qr);
-                        res.setHeader("Content-Type", "image/png");
-                        res.end(qrBuffer);
-                        console.log(`📷 QR sent to browser for session: ${id}`);
-                    } catch (err) {
-                        if (!res.headersSent) res.status(500).send("❌ Failed to generate QR");
-                        console.error(err);
-                    }
-                    return;
-                }
-
-                // WhatsApp connected
-                if (connection === "open") {
-                    console.log(`✅ ${sock.user.id} connected`);
-
-                    const credsPath = `${tempDir}/creds.json`;
-
-                    try {
-                        // Upload creds.json to Mega
-                        const megaUrl = await upload(fs.createReadStream(credsPath), `${sock.user.id}.json`);
-                        const sessionId = megaUrl.replace('https://mega.nz/file/', '');
-                        const md = `lordmega~${sessionId}`;
-
-                        // Send session ID
-                        const codeMsg = await sock.sendMessage(sock.user.id, { text: md });
-
-                        // Send info message
-                        const infoMsg = `
-*Hey MEGA-MD User!* 👋🏻
-Your session has been created successfully!
-
-🔐 *Session ID:* Sent above
-⚠️ *Keep it safe!* Do NOT share this ID with anyone.
-
-Stay updated: https://whatsapp.com/channel/0029Vb6covl05MUWlqZdHI2w
-Source code: https://github.com/Lawrence-bot-maker/MEGA-MD
-`;
-                        await sock.sendMessage(sock.user.id, {
-                            text: infoMsg,
-                            contextInfo: {
-                                externalAdReply: {
-                                    title: "Ｍｅｇａ𓃵 -M D Connected",
-                                    thumbnailUrl: "https://cdn.ironman.my.id/i/5xtyu7.jpg",
-                                    sourceUrl: "https://whatsapp.com/channel/0029Vb6covl05MUWlqZdHI2w",
-                                    mediaType: 1,
-                                    renderLargerThumbnail: true
-                                }
-                            }
-                        }, { quoted: codeMsg });
-
-                        // Cleanup
-                        removeFile(tempDir);
-                        await sock.ws.close();
-                        console.log(`👤 ${sock.user.id} session completed, temp folder removed`);
-                        process.exit();
-
-                    } catch (e) {
-                        console.error("❌ Error during Mega upload or message sending:", e);
-                        removeFile(tempDir);
-                        if (!res.headersSent) res.status(500).send({ code: "❗ Service Unavailable" });
-                    }
-                }
-
-                // Reconnect on unexpected close
-                else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode !== 401) {
-                    console.log("⚠ Connection closed, retrying...");
-                    await delay(1000);
-                    MEGA_MD_PAIR_CODE();
-                }
-            });
-
-        } catch (err) {
-            console.error("❌ Service restarted due to error:", err);
-            removeFile(tempDir);
-            if (!res.headersSent) res.status(503).send({ code: "❗ Service Unavailable" });
-        }
-    }
-
-    await MEGA_MD_PAIR_CODE();
+// Serve your qr.html file
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "qr.html"));
 });
 
-// Auto-restart process every 30 minutes
-setInterval(() => {
-    console.log("☘️ Restarting process...");
-    process.exit();
-}, 1800000); // 30 min
+// Serve current QR as an image
+app.get("/server", (req, res) => {
+  if (currentQR) {
+    const img = Buffer.from(currentQR.split(",")[1], "base64");
+    res.writeHead(200, { "Content-Type": "image/png" });
+    res.end(img);
+  } else {
+    res.status(404).send("QR not available yet");
+  }
+});
 
-module.exports = router;
+// Pairing logic
+async function startPair() {
+  const { state, saveCreds } = await useMultiFileAuthState("session");
+
+  const sock = makeWASocket({
+    printQRInTerminal: true,
+    auth: state,
+    browser: ["Mega-MD", "Chrome", "4.0"],
+  });
+
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log("⚡ New QR generated");
+      currentQR = await qrcode.toDataURL(qr);
+      connectionStatus = "qr_ready";
+    }
+
+    if (connection === "open") {
+      console.log("✅ Connected successfully!");
+      connectionStatus = "connected";
+      currentQR = null; // clear QR once connected
+    }
+
+    if (connection === "close") {
+      console.log("❌ Connection closed, retrying...");
+      connectionStatus = "disconnected";
+      startPair();
+    }
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+}
+
+// Start everything
+startPair();
+
+app.listen(PORT, () => {
+  console.log(`✅ Server running on http://localhost:${PORT}`);
+});
