@@ -1,20 +1,29 @@
-# Use official lightweight Node image
-FROM node:18-bullseye
+# Use a modern LTS Node image
+FROM node:20-bullseye
+
+# Install required system packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg \
+        imagemagick \
+        libwebp-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set working directory
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Copy package.json first (for caching)
-COPY package.json ./
+# Copy package files first to leverage Docker caching
+COPY package*.json ./
 
-# Install only production dependencies
-RUN npm install --omit=dev
+# Install dependencies locally & useful global tools
+RUN npm install && npm install -g pm2 qrcode-terminal
 
-# Copy the rest of the project files
+# Copy the rest of your project
 COPY . .
 
-# Expose your app port
+# Expose the port your app will run on
 EXPOSE 5000
 
-# Start the app
-CMD ["npm", "start"]
+# Start your app using PM2 for stability
+CMD ["pm2-runtime", "start", "index.js"]
