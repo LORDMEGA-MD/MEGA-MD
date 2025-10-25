@@ -1,70 +1,142 @@
-const express = require("express");
-const makeWASocket = require("@whiskeysockets/baileys").default;
-const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
-const qrcode = require("qrcode");
-const fs = require("fs");
-const path = require("path");
+Here is my qr.js
 
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-let currentQR = null; // store current QR as base64
-let connectionStatus = "waiting";
-
-// Serve your qr.html file
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "qr.html"));
-});
-
-// Serve current QR as an image
-app.get("/server", (req, res) => {
-  if (currentQR) {
-    const img = Buffer.from(currentQR.split(",")[1], "base64");
-    res.writeHead(200, { "Content-Type": "image/png" });
-    res.end(img);
-  } else {
-    res.status(404).send("QR not available yet");
-  }
-});
-
-// Pairing logic
-async function startPair() {
-  const { state, saveCreds } = await useMultiFileAuthState("session");
-
-  const sock = makeWASocket({
-    printQRInTerminal: true,
-    auth: state,
-    browser: ["Mega-MD", "Chrome", "4.0"],
-  });
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      console.log("⚡ New QR generated");
-      currentQR = await qrcode.toDataURL(qr);
-      connectionStatus = "qr_ready";
-    }
-
-    if (connection === "open") {
-      console.log("✅ Connected successfully!");
-      connectionStatus = "connected";
-      currentQR = null; // clear QR once connected
-    }
-
-    if (connection === "close") {
-      console.log("❌ Connection closed, retrying...");
-      connectionStatus = "disconnected";
-      startPair();
-    }
-  });
-
-  sock.ev.on("creds.update", saveCreds);
+const { makeid } = require('./gen-id');
+const express = require('express');
+const QRCode = require('qrcode');
+const fs = require('fs');
+let router = express.Router();
+const pino = require("pino");
+const {
+default: makeWASocket,
+useMultiFileAuthState,
+delay,
+makeCacheableSignalKeyStore,
+Browsers,
+jidNormalizedUser
+} = require("@whiskeysockets/baileys");
+const { upload } = require('./mega');
+function removeFile(FilePath) {
+if (!fs.existsSync(FilePath)) return false;
+fs.rmSync(FilePath, { recursive: true, force: true });
 }
+router.get('/', async (req, res) => {
+const id = makeid();
+//   let num = req.query.number;
+async function MEGA_MD_PAIR_CODE() {
+const {
+state,
+saveCreds
+} = await useMultiFileAuthState('./temp/' + id);
+try {
+var items = ["Safari"];
+function selectRandomItem(array) {
+var randomIndex = Math.floor(Math.random() * array.length);
+return array[randomIndex];
+}
+var randomItem = selectRandomItem(items);
 
-// Start everything
-startPair();
+let sock = makeWASocket({  
+            	  
+			auth: state,  
+			printQRInTerminal: false,  
+			logger: pino({  
+				level: "silent"  
+			}),  
+			browser: Browsers.macOS("Desktop"),  
+		});  
+          
+        sock.ev.on('creds.update', saveCreds);  
+        sock.ev.on("connection.update", async (s) => {  
+            const {  
+                connection,  
+                lastDisconnect,  
+                qr  
+            } = s;  
+          if (qr) await res.end(await QRCode.toBuffer(qr));  
+            if (connection == "open") {  
+                await delay(5000);  
+                let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);  
+                let rf = __dirname + `/temp/${id}/creds.json`;  
+                function generateRandomText() {  
+                    const prefix = "3EB";  
+                    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";  
+                    let randomText = prefix;  
+                    for (let i = prefix.length; i < 22; i++) {  
+                        const randomIndex = Math.floor(Math.random() * characters.length);  
+                        randomText += characters.charAt(randomIndex);  
+                    }  
+                    return randomText;  
+                }  
+                const randomText = generateRandomText();  
+                try {  
+                    const { upload } = require('./mega');  
+                    const mega_url = await upload(fs.createReadStream(rf), `${sock.user.id}.json`);  
+                    const string_session = mega_url.replace('https://mega.nz/file/', '');  
+                    let md = "lordmega~" + string_session;  
+                    let code = await sock.sendMessage(sock.user.id, { text: md });  
+                    let desc = `*Hey there, MEGA-MD User!* 👋🏻
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+Thanks for using MEGA-MD — your session has been successfully created!
+
+🔐 Session ID: Sent above
+⚠️ Keep it safe! Do NOT share this ID with anyone.
+
+——————
+
+✅ Stay Updated:
+Join our official WhatsApp Channel:
+https://whatsapp.com/channel/0029Vb6covl05MUWlqZdHI2w
+
+💻 Source Code:
+Fork & explore the project on GitHub:
+https://github.com/Lawrence-bot-maker/MEGA-MD
+
+——————
+
+> © Powered by Lord Mega
+for any help dm https://wa.me/256753679393 ✌🏻;   await sock.sendMessage(sock.user.id, {   text: desc,   contextInfo: {   externalAdReply: {   title: "Ｍｅｇａ𓃵 -M D 𝕮𝖔𝖓𝖓𝖊𝖈𝖙𝖊𝖉",   thumbnailUrl: "https://cdn.ironman.my.id/i/5xtyu7.jpg",   sourceUrl: "https://whatsapp.com/channel/0029Vb6covl05MUWlqZdHI2w",   mediaType: 1,   renderLargerThumbnail: true   }     }   },   {quoted:code })   } catch (e) {   let ddd = sock.sendMessage(sock.user.id, { text: e });   let desc = Hey there, MEGA-MD User! 👋🏻
+
+
+
+Thanks for using MEGA-MD — your session has been successfully created!
+
+🔐 Session ID: Sent above
+⚠️ Keep it safe! Do NOT share this ID with anyone.
+
+——————
+
+✅ Stay Updated:
+Join my official WhatsApp Channel:
+https://whatsapp.com/channel/0029Vb6covl05MUWlqZdHI2w
+
+💻 Source Code:
+Fork & explore the project on GitHub:
+https://github.com/Lawrence-bot-maker/MEGA-MD
+
+> © Powered by Lord Mega
+for any help dm https://wa.me/256753679393 ✌🏻*;   await sock.sendMessage(sock.user.id, {   text: desc,   contextInfo: {   externalAdReply: {   title: "Ｍｅｇａ𓃵 -M D 𝕮𝖔𝖓𝖓𝖊𝖈𝖙𝖊𝖉 ✅  ",   thumbnailUrl: "https://cdn.ironman.my.id/i/5xtyu7.jpg",   sourceUrl: "https://whatsapp.com/channel/0029Vb6covl05MUWlqZdHI2w",   mediaType: 2,   renderLargerThumbnail: true,   showAdAttribution: true   }     }   },   {quoted:ddd })   }   await delay(10);   await sock.ws.close();   await removeFile('./temp/' + id);   console.log(👤 ${sock.user.id} 𝗖𝗼𝗻𝗻𝗲𝗰𝘁𝗲𝗱 ✅ 𝗥𝗲𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗽𝗿𝗼𝗰𝗲𝘀𝘀...`);
+await delay(10);
+process.exit();
+} else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
+await delay(10);
+MEGA_MD_PAIR_CODE();
+}
 });
+} catch (err) {
+console.log("service restated");
+await removeFile('./temp/' + id);
+if (!res.headersSent) {
+await res.send({ code: "❗ Service Unavailable" });
+}
+}
+}
+await MEGA_MD_PAIR_CODE();
+});
+setInterval(() => {
+console.log("☘️ 𝗥𝗲𝘀𝘁𝗮𝗿𝘁𝗶𝗻𝗴 𝗽𝗿𝗼𝗰𝗲𝘀𝘀...");
+process.exit();
+}, 180000); //30min
+module.exports = router;
+
+
+
